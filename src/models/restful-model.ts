@@ -51,8 +51,27 @@ export default class RestfulModel extends Model {
     );
   }
 
-  fromJSON(json: Partial<RestfulModelJSON> = {}): this {
-    return super.fromJSON(json) as this;
+  fromJSON(json: Partial<RestfulModelJSON> = {}) {
+    const attributes = this.attributes();
+    for (const attrName in attributes) {
+      const attr = attributes[attrName];
+      if (json[attr.jsonKey] !== undefined) {
+        (this as any)[attrName] = attr.fromJSON(json[attr.jsonKey], this);
+      }
+    }
+    return this;
+  }
+
+  toJSON(enforceReadOnly?: boolean) {
+    const json: any = {};
+    const attributes = this.attributes();
+    for (const attrName in attributes) {
+      if (!attributes[attrName].readOnly || enforceReadOnly !== true) {
+        const attr = attributes[attrName];
+        json[attr.jsonKey] = attr.toJSON((this as any)[attrName]);
+      }
+    }
+    return json;
   }
 
   // Subclasses should override this method.
