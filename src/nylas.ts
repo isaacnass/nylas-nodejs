@@ -1,5 +1,6 @@
 // TODO since node 10 URL is global
 import { URL } from 'url';
+import { EventEmitter } from 'events';
 import fetch from 'node-fetch';
 import * as config from './config';
 import NylasConnection, { RequestOptions } from './nylas-connection';
@@ -8,34 +9,56 @@ import Account from './models/account';
 import Connect from './models/connect';
 import RestfulModelCollection from './models/restful-model-collection';
 import ManagementModelCollection from './models/management-model-collection';
-import Webhook from './models/webhook';
+import Webhook, { WebhookTriggers } from './models/webhook';
 import { AuthenticateUrlConfig, NylasConfig } from './config';
 import AccessToken from './models/access-token';
 import ApplicationDetails, {
   ApplicationDetailsProperties,
 } from './models/application-details';
+import { IServerBindingOptions, serverBindings } from './server-bindings';
+import { Express, Response } from 'express';
+import { WebhookDeltaProperties } from './models/webhook-notification';
 
-class Nylas {
-  static clientId = '';
-  static get clientSecret(): string {
+class Nylas extends EventEmitter {
+  // Taken from the best StackOverflow answer of all time https://stackoverflow.com/a/56228127
+  private _untypedOn = this.on;
+  private _untypedEmit = this.emit;
+  public on = <K extends WebhookTriggers | 'token-exchange'>(
+    event: K,
+    listener: (
+      payload: K extends WebhookTriggers
+        ? WebhookDeltaProperties
+        : { accessTokenObj: AccessToken; res: Response }
+    ) => void
+  ): this => this._untypedOn(event, listener);
+  public emit = <K extends WebhookTriggers | 'token-exchange'>(
+    event: K,
+    payload: K extends WebhookTriggers
+      ? WebhookDeltaProperties
+      : { accessTokenObj: AccessToken; res: Response }
+  ): boolean => this._untypedEmit(event, payload);
+
+  clientId = '';
+  get clientSecret(): string {
     return config.clientSecret;
   }
-  static set clientSecret(newClientSecret: string) {
+  set clientSecret(newClientSecret: string) {
     config.setClientSecret(newClientSecret);
   }
-  static get apiServer(): string | null {
+  get apiServer(): string | null {
     return config.apiServer;
   }
-  static set apiServer(newApiServer: string | null) {
+  set apiServer(newApiServer: string | null) {
     config.setApiServer(newApiServer);
   }
-  static accounts:
+  accounts:
     | ManagementModelCollection<ManagementAccount>
     | RestfulModelCollection<Account>;
-  static connect: Connect;
-  static webhooks: ManagementModelCollection<Webhook>;
+  connect: Connect;
+  webhooks: ManagementModelCollection<Webhook>;
 
-  static config(config: NylasConfig): Nylas {
+  constructor(config: NylasConfig) {
+    super();
     if (config.apiServer && config.apiServer.indexOf('://') === -1) {
       throw new Error(
         'Please specify a fully qualified URL for the API Server.'
@@ -75,18 +98,22 @@ class Nylas {
     return this;
   }
 
-  static clientCredentials(): boolean {
+  mountExpress(app: Express, options: IServerBindingOptions) {
+    serverBindings.express(this, app, options);
+  }
+
+  clientCredentials(): boolean {
     return this.clientId != null && this.clientSecret != null;
   }
 
-  static with(accessToken: string): NylasConnection {
+  with(accessToken: string): NylasConnection {
     if (!accessToken) {
       throw new Error('This function requires an access token');
     }
     return new NylasConnection(accessToken, { clientId: this.clientId });
   }
 
-  static application(
+  application(
     options?: ApplicationDetailsProperties
   ): Promise<ApplicationDetails> {
     if (!this.clientId) {
@@ -115,7 +142,7 @@ class Nylas {
     });
   }
 
-  static exchangeCodeForToken(
+  exchangeCodeForToken(
     code: string,
     callback?: (error: Error | null, accessToken?: string) => void
   ): Promise<AccessToken> {
@@ -161,7 +188,7 @@ class Nylas {
       );
   }
 
-  static urlForAuthentication(options: AuthenticateUrlConfig): string {
+  urlForAuthentication(options: AuthenticateUrlConfig): string {
     if (!this.clientId) {
       throw new Error(
         'urlForAuthentication() cannot be called until you provide a clientId via config()'
@@ -193,8 +220,8 @@ class Nylas {
    * Revoke a single access token
    * @param accessToken The access token to revoke
    */
-  static revoke(accessToken: string): Promise<void> {
-    return Nylas.with(accessToken)
+  revoke(accessToken: string): Promise<void> {
+    return this.with(accessToken)
       .request({
         method: 'POST',
         path: '/oauth/revoke',

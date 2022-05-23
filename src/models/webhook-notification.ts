@@ -1,5 +1,6 @@
 import Model from './model';
 import Attributes, { Attribute } from './attributes';
+import { WebhookTriggers } from './webhook';
 
 export type LinkClickProperties = {
   id: number;
@@ -239,7 +240,7 @@ export class WebhookObjectData extends Model
 
 export type WebhookDeltaProperties = {
   object: string;
-  type: string;
+  type: WebhookTriggers | '';
   date: Date;
   objectData: WebhookObjectDataProperties;
 };
@@ -247,7 +248,7 @@ export type WebhookDeltaProperties = {
 export class WebhookDelta extends Model implements WebhookDeltaProperties {
   date = new Date();
   object = '';
-  type = '';
+  type = '' as const;
   objectData = new WebhookObjectData();
   static attributes: Record<string, Attribute> = {
     date: Attributes.DateTime({
